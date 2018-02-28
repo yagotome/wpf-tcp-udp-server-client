@@ -6,13 +6,18 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 
-namespace ClienteUdp
+namespace ClienteTcpUdp
 {
     enum State
     {
         ReadyToSend,
         Listening,
         ReadyToListen
+    }
+    enum TransportProtocol
+    {
+        TCP,
+        UDP
     }
     /// <summary>
     /// Interaction logic for MainWindow.xaml
@@ -21,6 +26,7 @@ namespace ClienteUdp
     {
         private State state;
         private Thread listeningThread;
+        private TransportProtocol transportProtocol;
 
         public MainWindow()
         {
@@ -36,6 +42,9 @@ namespace ClienteUdp
         {
             try
             {
+                string ip = TbIp.Text;
+                int port = int.Parse(TbPort.Text);
+                IPEndPoint ep = new IPEndPoint(IPAddress.Parse(ip), port);
                 switch (State)
                 {
                     case State.Listening:
@@ -44,36 +53,12 @@ namespace ClienteUdp
                         State = State.ReadyToListen;
                         break;
                     case State.ReadyToListen:
-                        string ip = TbIp.Text;
-                        int port = int.Parse(TbPort.Text);
-                        listeningThread = new Thread(() =>
-                        {
-                            IPEndPoint ep = new IPEndPoint(IPAddress.Parse(ip), port);
-                            using (UdpClient udpClient = new UdpClient(ep))
-                            {
-                                while (true)
-                                {
-                                    byte[] data = udpClient.Receive(ref ep);
-                                    string msg = Encoding.UTF8.GetString(data);
-                                    Dispatcher.Invoke(() =>
-                                    {
-                                        TbMessage.Text += msg;
-                                        TbMessage.ScrollToEnd();
-                                    });
-                                }
-                            }
-
-                        })
-                        { IsBackground = true };
+                        listeningThread = new Thread(() => ListenSocket(UpdateTbMessage, ep, transportProtocol)) { IsBackground = false };
                         listeningThread.Start();
                         State = State.Listening;
                         break;
                     case State.ReadyToSend:
-                        using (UdpClient udpClient = new UdpClient(TbIp.Text, int.Parse(TbPort.Text)))
-                        {
-                            Byte[] sendBytes = Encoding.UTF8.GetBytes(TbMessage.Text);
-                            udpClient.Send(sendBytes, sendBytes.Length);
-                        }
+                        SendSocket(TbMessage.Text, ep, transportProtocol);
                         break;
                 }
                 TbMessage.Text = "";
@@ -81,6 +66,53 @@ namespace ClienteUdp
             catch (Exception ex)
             {
                 MessageBox.Show(ex.ToString());
+            }
+        }
+
+        private void UpdateTbMessage(string message)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                TbMessage.Text += message;
+                TbMessage.ScrollToEnd();
+            });
+        }
+
+        private static void ListenSocket(Action<string> callback, IPEndPoint endPoint, TransportProtocol protocol)
+        {
+            byte[] buffer = new byte[1024];
+            using (Socket listener = new Socket(endPoint.AddressFamily, protocol == TransportProtocol.TCP ? SocketType.Stream : SocketType.Dgram, ProtocolType.IP))
+            {
+                listener.Bind(endPoint);
+                if (protocol == TransportProtocol.TCP)
+                    listener.Listen(200);
+
+                while (true)
+                {
+                    Socket handler = protocol == TransportProtocol.TCP ? listener.Accept() : listener;
+                    string message = "";
+                    int receivedBytes;
+                    while ((receivedBytes = handler.Receive(buffer)) > 0)
+                    {
+                        message += Encoding.UTF8.GetString(buffer, 0, receivedBytes);
+                        if (protocol == TransportProtocol.UDP)
+                            break;
+                    }
+                    callback(message);
+                }
+            }
+        }
+
+        private void SendSocket(string message, IPEndPoint endPoint, TransportProtocol protocol)
+        {
+            using (Socket socket = new Socket(endPoint.AddressFamily, protocol == TransportProtocol.TCP ? SocketType.Stream : SocketType.Dgram, ProtocolType.IP))
+            {
+                socket.Connect(endPoint);
+                if (socket.Connected)
+                {
+                    byte[] msgBytes = Encoding.UTF8.GetBytes(message);
+                    socket.Send(msgBytes, msgBytes.Length, SocketFlags.None);
+                }
             }
         }
 
@@ -121,6 +153,16 @@ namespace ClienteUdp
             {
                 SendOrListenAction();
             }
+        }
+
+        private void RdbUdp_Checked(object sender, RoutedEventArgs e)
+        {
+            transportProtocol = TransportProtocol.UDP;
+        }
+
+        private void RdbTcp_Checked(object sender, RoutedEventArgs e)
+        {
+            transportProtocol = TransportProtocol.TCP;
         }
     }
 }
