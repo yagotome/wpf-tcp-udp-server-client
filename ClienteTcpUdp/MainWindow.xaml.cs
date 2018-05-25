@@ -25,7 +25,7 @@ namespace ClienteTcpUdp
     public partial class MainWindow : Window
     {
         private State state;
-        private Thread listeningThread;
+        private Socket listeningSocket;
         private TransportProtocol transportProtocol;
 
         public MainWindow()
@@ -48,13 +48,11 @@ namespace ClienteTcpUdp
                 switch (State)
                 {
                     case State.Listening:
-                        listeningThread.Abort();
-                        listeningThread = null;
+                        listeningSocket?.Close();
                         State = State.ReadyToListen;
                         break;
                     case State.ReadyToListen:
-                        listeningThread = new Thread(() => ListenSocket(UpdateTbMessage, ep, transportProtocol)) { IsBackground = false };
-                        listeningThread.Start();
+                        new Thread(() => ListenSocket(UpdateTbMessage, ep, transportProtocol, out listeningSocket)) { IsBackground = true }.Start();
                         State = State.Listening;
                         break;
                     case State.ReadyToSend:
@@ -78,27 +76,35 @@ namespace ClienteTcpUdp
             });
         }
 
-        private static void ListenSocket(Action<string> callback, IPEndPoint endPoint, TransportProtocol protocol)
+        private static void ListenSocket(Action<string> callback, IPEndPoint endPoint, TransportProtocol protocol, out Socket listener)
         {
             byte[] buffer = new byte[1024];
-            using (Socket listener = new Socket(endPoint.AddressFamily, protocol == TransportProtocol.TCP ? SocketType.Stream : SocketType.Dgram, ProtocolType.IP))
+            using (listener = new Socket(endPoint.AddressFamily, protocol == TransportProtocol.TCP ? SocketType.Stream : SocketType.Dgram, ProtocolType.IP))
             {
-                listener.Bind(endPoint);
-                if (protocol == TransportProtocol.TCP)
-                    listener.Listen(200);
-
-                while (true)
+                try
                 {
-                    Socket handler = protocol == TransportProtocol.TCP ? listener.Accept() : listener;
-                    string message = "";
-                    int receivedBytes;
-                    while ((receivedBytes = handler.Receive(buffer)) > 0)
+                    listener.Bind(endPoint);
+                    if (protocol == TransportProtocol.TCP)
+                        listener.Listen(200);
+
+                    while (true)
                     {
-                        message += Encoding.UTF8.GetString(buffer, 0, receivedBytes);
-                        if (protocol == TransportProtocol.UDP)
-                            break;
+                        Socket handler = protocol == TransportProtocol.TCP ? listener.Accept() : listener;
+                        string message = "";
+                        int receivedBytes;
+                        while ((receivedBytes = handler.Receive(buffer)) > 0)
+                        {
+                            message += Encoding.UTF8.GetString(buffer, 0, receivedBytes);
+                            if (protocol == TransportProtocol.UDP)
+                                break;
+                        }
+                        callback(message);
                     }
-                    callback(message);
+                }
+                catch (SocketException e)
+                {
+                    if (e.SocketErrorCode != SocketError.Interrupted)
+                        MessageBox.Show($"Erro: {e.Message}");
                 }
             }
         }
@@ -143,6 +149,8 @@ namespace ClienteTcpUdp
                 TbIp.IsEnabled = isntListening;
                 TbPort.IsEnabled = isntListening;
                 CkbServidor.IsEnabled = isntListening;
+                RdbTcp.IsEnabled = isntListening;
+                RdbUdp.IsEnabled = isntListening;
                 TbMessage.IsReadOnly = !isntListening;
             }
         }
