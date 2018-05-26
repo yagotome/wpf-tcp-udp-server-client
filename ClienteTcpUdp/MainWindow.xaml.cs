@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 
@@ -125,15 +124,12 @@ namespace ClienteTcpUdp
         {
             string message = "";
             int receivedBytes;
-            DateTime i = DateTime.Now;
             while ((receivedBytes = socket.Receive(buffer)) > 0)
             {
                 message += Encoding.UTF8.GetString(buffer, 0, receivedBytes);
                 if (protocol == TransportProtocol.UDP)
                     break;
-                Console.WriteLine(DateTime.Now - i);
             }
-            Console.WriteLine(DateTime.Now - i);
             return message;
         }
 
